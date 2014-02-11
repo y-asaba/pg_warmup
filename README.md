@@ -6,6 +6,18 @@ You can put contents onto not only kernel cache but also shared buffer.
 * Python (2.7, 3.3)
 * psycopg2 (pip install psycopg2)
 
+## How to install
+* Using pip
+```
+  % pip install pg_warmup
+```
+* Build from souce code
+```
+  % pip install psycopg2
+  % python setup.py install
+```
+
+
 ## Usage
 * You need to run pg_warmup by postgres superuser
 * You may also need to set PG_* environment variables to connect the server

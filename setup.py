@@ -3,7 +3,6 @@
 from setuptools import setup, find_packages
 
 requires = ['psycopg2==2.5.1']
-print(find_packages())
 
 setup(name='pg_warmup',
       version          = '0.1.0',

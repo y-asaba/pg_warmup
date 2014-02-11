@@ -8,6 +8,17 @@ PostgreSQL起動後にtableやindexをキャッシュにのせるためのツー
 * Python (2.7, 3.3)
 * psycopg2 (pip install psycopg2)
 
+## How to install
+* pip使う場合
+```
+  % pip install pg_warmup
+```
+* ソースコードからビルドする場合
+```
+  % pip install psycopg2
+  % python setup.py install
+```
+
 ## 使い方
 * PostgreSQLを起動しているユーザ(大抵の場合はpostgresユーザ)で実行します
 * 場合によってはPG_HOSTなどのPG_*環境変数を設定する必要があります
