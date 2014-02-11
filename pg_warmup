@@ -1,0 +1,162 @@
+#! /usr/bin/env python
+#/* -*- coding: utf-8 -*- */
+
+import sys
+import psycopg2
+from os import devnull
+from subprocess import check_output, call
+from optparse import OptionParser
+
+
+class RelationNotFoundException(Exception):
+    pass
+
+
+class Relation:
+    def __init__(self, dbname, relname, size, path):
+        self.dbname = dbname
+        self.relname = relname
+        self.size = int(size)
+        self.path = path
+        self.indexes = []
+        self.make_db_connection()
+
+    def __del__(self):
+        self.conn.close()
+        self.conn = None
+
+    def make_db_connection(self):
+        self.conn = psycopg2.connect("dbname=%s" % self.dbname)
+
+    def add_index(self, index):
+        self.indexes.append(index)
+
+    def warmup(self, dryrun=True, use_shared_buffer=False, use_ionice=True):
+        print("#### WARMUP ####")
+        if (use_shared_buffer):
+            cur = self.conn.cursor()
+            sql = "SELECT count(*) from %s" % self.relname
+            print("Query: %s" % sql)
+            if not dryrun:
+                cur.execute("SELECT count(*) from %s" % self.relname)
+        else:
+            if use_ionice:
+                ionice = 'ionice -c 3'
+            else:
+                ionice = ''
+
+            # cat relation file
+            cmd = "%s cat %s > /dev/null" % (ionice, self.path)
+            print(cmd)
+            if not dryrun:
+                check_output(cmd, shell=True)
+            for i in self.indexes:
+                cmd = "%s cat %s > /dev/null" % (ionice, i.path)
+                print(cmd)
+                if not dryrun:
+                    check_output(cmd, shell=True)
+        print("Done")
+
+    @classmethod
+    def get_relation(cls, dbname, relname):
+        data = Relation(dbname, relname, 0, '')
+        cur = data.conn.cursor()
+
+        #
+        # get table name, size and file path
+        #
+        cur.execute("""
+SELECT relname, current_setting('data_directory') || '/' ||  pg_relation_filepath(oid) AS filepath,
+       pg_relation_size(oid) AS filesize
+   FROM pg_class WHERE relname = %s;
+""", (relname,))
+        rows = cur.fetchall()
+        if (len(rows) == 0):
+            raise RelationNotFoundException
+        for row in rows:
+            data.path = row[1]
+            data.size = int(row[2])
+
+        #
+        # get index name, size and file path
+        #
+        cur.execute("""
+SELECT relname, current_setting('data_directory') || '/' ||  pg_relation_filepath(oid) AS filepath,
+       pg_relation_size(oid) AS filesize
+   FROM pg_class WHERE oid IN (SELECT indexrelid FROM pg_index
+                                  WHERE indrelid = (SELECT oid FROM pg_class WHERE relname = %s))
+""", (relname,))
+        rows = cur.fetchall()
+        for row in rows:
+            data.add_index(Index(row[0], row[1], row[2]))
+
+        return data
+
+    def print_relation(self):
+        print("#### TABLE ####")
+        print("name: %s, size: %.2lfMB, filepath: %s" % (self.relname, (self.size / 1024 / 1024), self.path))
+
+        if (len(self.indexes) != 0):
+            print("")
+            print("#### INDEX ####")
+            for i in self.indexes:
+                print("name: %s, size: %.2lfMB" % (i.index_name, (i.size / 1024 / 1024)))
+                print("filepath: %s" % i.path)
+                print("")
+
+
+class Index():
+    def __init__(self, index_name, path, size):
+        self.index_name = index_name
+        self.size = int(size)
+        self.path = path
+
+
+if __name__ == '__main__':
+    parser = OptionParser()
+    parser.add_option('-t', '--table', dest='table', type="string", help="warmup the named table")
+    parser.add_option('-d', '--database', dest='database', type="string", help="dbname")
+    parser.add_option('-i', action='store_true', dest='use_ionice',
+                      default=False, help="use ionice command")
+    parser.add_option('-s', action='store_true', dest='use_shared_buffer',
+                      default=False, help="cache on shared buffer, not page cache")
+    parser.add_option('-x', action='store_false', dest='dryrun',
+                      default=True, help="execute warmup")
+
+    (options, args) = parser.parse_args()
+    try:
+        if options.database is None:
+            print("Please specify a database name using -d option")
+            sys.exit(1)
+
+        if options.table is None:
+            print("Please specify a table name using -t option")
+            sys.exit(1)
+
+        if options.use_ionice:
+            #
+            # Check if ionice is installed
+            #
+            with open(devnull, "w") as fnull:
+                try:
+                    ret = call(['ionice', '-h'], stdout=fnull, stderr=fnull)
+                    if ret != 0:
+                        print("ionice is not installed. Please install ionice or run pg_warmup without -i option")
+                        sys.exit(1)
+                except Exception as ex:
+                    #
+                    # In python 3.3, FileNotFoundException will be occured.
+                    # In python 2.7, OSError will be occured.
+                    #
+                    print("ionice is not installed. Please install ionice or run pg_warmup without -i option")
+                    sys.exit(1)
+
+        relation = Relation.get_relation(options.database, options.table)
+        relation.print_relation()
+        relation.warmup(use_shared_buffer=options.use_shared_buffer, use_ionice=options.use_ionice, dryrun=options.dryrun)
+        if options.dryrun:
+            print("\033[31m!! This is a dry run. Please specify -x option to warmup !!\033[0m")
+
+    except RelationNotFoundException:
+        print("ERROR: \"%s\" table does not exist" % options.table)
+        sys.exit(1)
