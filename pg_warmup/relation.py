@@ -3,6 +3,7 @@
 import sys
 import psycopg2
 from subprocess import check_output
+import os.path
 
 
 class RelationNotFoundException(Exception):
@@ -43,19 +44,44 @@ class Relation(object):
                 ionice = ''
 
             # cat relation file
-            cmd = "%s cat %s > /dev/null" % (ionice, self.path)
-            print(cmd)
-            if not dryrun:
-                check_output(cmd, shell=True)
-            for i in self.indexes:
-                cmd = "%s cat %s > /dev/null" % (ionice, i.path)
+            for p in self.path:
+                cmd = "%s cat %s > /dev/null" % (ionice, p)
                 print(cmd)
                 if not dryrun:
                     check_output(cmd, shell=True)
-        print("Done")
+
+            for i in self.indexes:
+                for index_path in i.path:
+                    cmd = "%s cat %s > /dev/null" % (ionice, index_path)
+                    print(cmd)
+                    if not dryrun:
+                        check_output(cmd, shell=True)
+            print("Done")
 
     @classmethod
     def get_relation(cls, dbname, relname):
+
+        def get_path_list(basepath):
+            if not os.path.exists(basepath):
+                return None
+
+            #
+            # get relfilenode.%d files
+            #
+            path_list = [basepath]
+            num = 1
+            while True:
+                path = "%s.%d" % (row[1], num)
+
+                if os.path.exists(path):
+                    path_list.append(path)
+                    num += 1
+                else:
+                    break
+
+            return path_list
+
+
         data = Relation(dbname, relname, 0, '')
         cur = data.conn.cursor()
 
@@ -71,8 +97,9 @@ SELECT relname, current_setting('data_directory') || '/' ||  pg_relation_filepat
         if (len(rows) == 0):
             raise RelationNotFoundException
         for row in rows:
-            data.path = row[1]
+            data.path = get_path_list(row[1])
             data.size = int(row[2])
+            print(data.path)
 
         #
         # get index name, size and file path
@@ -85,20 +112,25 @@ SELECT relname, current_setting('data_directory') || '/' ||  pg_relation_filepat
 """, (relname,))
         rows = cur.fetchall()
         for row in rows:
-            data.add_index(Index(row[0], row[1], row[2]))
+            data.add_index(Index(row[0], get_path_list(row[1]), row[2]))
 
         return data
 
     def print_relation(self):
         print("#### TABLE ####")
-        print("name: %s, size: %.2lfMB, filepath: %s" % (self.relname, (self.size / 1024 / 1024), self.path))
+        print("name: %s, size: %.2lfMB" % (self.relname, (self.size / 1024 / 1024)))
+        print("filepath:")
+        for p in self.path:
+            print("\t%s" % p)
 
         if (len(self.indexes) != 0):
             print("")
             print("#### INDEX ####")
             for i in self.indexes:
                 print("name: %s, size: %.2lfMB" % (i.index_name, (i.size / 1024 / 1024)))
-                print("filepath: %s" % i.path)
+                print("filepath:")
+                for p in i.path:
+                    print("\t%s" % p)
                 print("")
 
 
