@@ -3,7 +3,10 @@ from os import devnull
 from optparse import OptionParser
 from subprocess import check_output, call
 
-from pg_warmup.relation import Relation, RelationNotFoundException
+from pg_warmup.relation import (
+    Relation, RelationNotFoundException,
+    RelationFileAccessDeniedException
+)
 
 
 def main():
@@ -53,6 +56,10 @@ def main():
 
     except RelationNotFoundException:
         print("ERROR: \"%s\" table does not exist" % options.table)
+        sys.exit(1)
+
+    except RelationFileAccessDeniedException:
+        print("ERROR: Cannot access files of \"%s\" table" % options.table)
         sys.exit(1)
     
 

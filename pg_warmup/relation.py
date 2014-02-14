@@ -10,6 +10,10 @@ class RelationNotFoundException(Exception):
     pass
 
 
+class RelationFileAccessDeniedException(Exception):
+    pass
+
+
 class Relation(object):
     def __init__(self, dbname, relname, size, path):
         self.dbname = dbname
@@ -63,7 +67,7 @@ class Relation(object):
 
         def get_path_list(basepath):
             if not os.path.exists(basepath):
-                return None
+                raise RelationFileAccessDeniedException
 
             #
             # get relfilenode.%d files
